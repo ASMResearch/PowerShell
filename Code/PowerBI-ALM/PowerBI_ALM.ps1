@@ -1,18 +1,20 @@
-# ==================================================================
-# PART 1: Set parameters, verify Power BI modules are installed
-#         and authenticate user.
-# ==================================================================
-# Parameters - look into using param(
+﻿<#
+.Synopsis
+	
+.Description
+	
+#>
 param(
+    [string] $ResultsPath = "C:\Users\christopher.small\Accenture Federal Services\ADAP - PowerShell Results",
     [string] $myWorkspaceID = "MyWorkspace",
-    [string] $xPath = "$($HOME)\Documents\PowerShellResults",
-    [string] $prmExecutionPolicy = "Unrestricted",
-    [string] $prmMicrosoftPowerBIMgmt = "MicrosoftPowerBIMgmt",
-    [string] $prmOnPremisesDataGatewayHAMgmtName = "OnPremisesDataGatewayHAMgmt",
-    [string] $prmOnPremisesDataGatewayHAMgmtPath = "C:\Program Files\On-premises data gateway\OnPremisesDataGatewayHAMgmt.psm1"
+    [string] $MicrosoftPowerBIMgmtName = "MicrosoftPowerBIMgmt",
+    [string] $OnPremisesDataGatewayHAMgmtName = "OnPremisesDataGatewayHAMgmt",
+    [string] $OnPremisesDataGatewayHAMgmtPath = "C:\Program Files\On-premises data gateway\OnPremisesDataGatewayHAMgmt.psm1"
 )
 
-# Function Assert-ModuleExists - test function -> Assert-ModuleExists -ModuleName "MicrosoftPowerBIMgmt"
+# ==================================================================
+#region Helper Functions 
+# ==================================================================
 function Assert-ModuleExists([string]$ModuleName) {
     $module = Get-Module $ModuleName -ListAvailable -ErrorAction SilentlyContinue
     if (!$module) {
@@ -27,40 +29,80 @@ function Assert-ModuleExists([string]$ModuleName) {
     }
 }
 
-# ExecutionPolicy Unrestricted check
-If ((Get-ExecutionPolicy) -ne $prmExecutionPolicy) # check if ExecutionPolicy is set to Unrestricted
-{
-    Set-ExecutionPolicy -ExecutionPolicy $prmExecutionPolicy -Force
-}
+#endregion
 
-# MicrosoftPowerBIMgmt install check
-If (!(Get-InstalledModule -Name $prmMicrosoftPowerBIMgmt)) # check if MicrosoftPowerBIMgmt installed
+# ==================================================================
+#region MicrosoftPowerBIMgmt install check
+# ==================================================================
+# 
+If (!(Get-InstalledModule -Name $MicrosoftPowerBIMgmtName)) # check if MicrosoftPowerBIMgmt installed
 {
     # install MicrosoftPowerBIMgmt
-    Install-Module -Name $prmMicrosoftPowerBIMgmt
+    Install-Module -Name $MicrosoftPowerBIMgmtName
 }
-
 # MicrosoftPowerBIMgmt import check
-If (!(Get-Module -Name $prmMicrosoftPowerBIMgmt)) # check if MicrosoftPowerBIMgmt imported
+If (!(Get-Module -Name $MicrosoftPowerBIMgmtName)) # check if MicrosoftPowerBIMgmt imported
 {
     # import MicrosoftPowerBIMgmt
-    Import-Module -Name $prmMicrosoftPowerBIMgmt
+    Import-Module -Name $MicrosoftPowerBIMgmtName
 }
 # OnPremisesDataGatewayHAMgmt import check
-If (!(Get-Module -Name $prmOnPremisesDataGatewayHAMgmtName)) # check if OnPremisesDataGatewayHAMgmt imported
+If (!(Get-Module -Name $OnPremisesDataGatewayHAMgmtName)) # check if OnPremisesDataGatewayHAMgmt imported
 {
     # import OnPremisesDataGatewayHAMgmt
-    Import-Module $prmOnPremisesDataGatewayHAMgmtPath
+    Import-Module $OnPremisesDataGatewayHAMgmtPath
 }
 
-# Authenticate user - login to Power BI
-Connect-PowerBIServiceAccount | Out-Null
+#endregion
 
 # ==================================================================
-# PART 2: Get MyWorkspace Power BI Objects 
+#region Authenticate user - login to Power BI
+# ==================================================================
+# 
+Connect-PowerBIServiceAccount | Out-Null
+
+#endregion
+
+# ==================================================================
+#region Get Apps 
 # ==================================================================
 # create empty array
-$myApps = @()
+$allApps = @()
+$allAppReports = @()
+$allAppDashboards = @()
+
+# get all apps
+$apps = ((Invoke-PowerBIRestMethod -Url "apps" -Method Get) | ConvertFrom-Json).value
+$allApps = $apps
+
+# go thru apps
+foreach ($app in $apps)
+{
+    # Apps - Get Reports
+    $appReports = ((Invoke-PowerBIRestMethod -Url "apps/$($app.id)/reports" -Method Get) | ConvertFrom-Json).value
+    $allAppReports = $allAppReports + $appReports
+
+    # Apps - Get Dashboards
+    $appDashboards = ((Invoke-PowerBIRestMethod -Url "apps/$($app.id)/dashboards" -Method Get) | ConvertFrom-Json).value
+    $allAppDashboards = $allAppDashboards + $appDashboards
+}
+
+# create CSV files
+$allApps | Export-Csv -Path $ResultsPath\Apps.csv -Delimiter ";" -NoTypeInformation
+$allAppReports | Export-Csv -Path $ResultsPath\AppReports.csv -Delimiter ";" -NoTypeInformation
+$allAppDashboards | Export-Csv -Path $ResultsPath\AppDashboards.csv -Delimiter ";" -NoTypeInformation
+
+# create JSON files
+$allApps | ConvertTo-Json -Depth 4 | Out-File -FilePath $ResultsPath\Apps.json -Force
+$allAppReports | ConvertTo-Json -Depth 4 | Out-File -FilePath $ResultsPath\AppReportss.json -Force
+$allAppDashboards | ConvertTo-Json -Depth 4 | Out-File -FilePath $ResultsPath\AppDashboards.json -Force
+
+#endregion
+
+# ==================================================================
+#region Get Power BI Objects (My Workspace)
+# ==================================================================
+# create empty array
 $myReports = @()
 $myDashboards = @()
 $myDatasets = @()
@@ -128,51 +170,12 @@ foreach ($ds in $myDatasets)
         }
         $myDsGateways = $myDsGateways + $dsGateways
     }
-# 
-$myReports | Export-Csv -Path $HOME\Documents\PowerShellResults\MyWorkspaceReports.csv -Delimiter ";" -NoTypeInformation
-$myDashboards | Export-Csv -Path $HOME\Documents\PowerShellResults\MyWorkspaceDashboards.csv -Delimiter ";" -NoTypeInformation
-$myDatasets | Export-Csv -Path $HOME\Documents\PowerShellResults\MyWorkspaceDatasets.csv -Delimiter ";" -NoTypeInformation
-$myDsParameters | Export-Csv -Path $HOME\Documents\PowerShellResults\MyWorkspaceDatasetParameters.csv -Delimiter ";" -NoTypeInformation
-$myDsDatasources | Export-Csv -Path $HOME\Documents\PowerShellResults\MyWorkspaceDatasetDatasources.csv -Delimiter ";" -NoTypeInformation
-$myDsRefreshHistory | Export-Csv -Path $HOME\Documents\PowerShellResults\MyWorkspaceDatasetRefreshHistory.csv -Delimiter ";" -NoTypeInformation
-$myDsGateways | Export-Csv -Path $HOME\Documents\PowerShellResults\MyWorkspaceDatasetGateways.csv -Delimiter ";" -NoTypeInformation
+
+#endregion
+
 
 # ==================================================================
-# PART 2: Get Apps 
-# ==================================================================
-# create empty array
-$allApps = @()
-$allAppReports = @()
-$allAppDashboards = @()
-
-# get all apps
-$apps = ((Invoke-PowerBIRestMethod -Url "apps" -Method Get) | ConvertFrom-Json).value
-$allApps = $apps
-
-# go thru apps
-foreach ($app in $apps)
-{
-    # Apps - Get Reports
-    $appReports = ((Invoke-PowerBIRestMethod -Url "apps/$($app.id)/reports" -Method Get) | ConvertFrom-Json).value
-    $appReports | ForEach-Object{
-	    $_ | Add-Member -MemberType NoteProperty -Name "App Id" -Value $app.id
-    }
-    $allAppReports = $allAppReports + $appReports
-
-    # Apps - Get Dashboards
-    $appDashboards = ((Invoke-PowerBIRestMethod -Url "apps/$($app.id)/dashboards" -Method Get) | ConvertFrom-Json).value
-    $appDashboards | ForEach-Object{
-	    $_ | Add-Member -MemberType NoteProperty -Name "App Id" -Value $app.id
-    }
-    $allAppDashboards = $allAppDashboards + $appDashboards
-}
-# 
-$allApps | Export-Csv -Path $HOME\Documents\PowerShellResults\Apps.csv -Delimiter ";" -NoTypeInformation
-$allAppReports | Export-Csv -Path $HOME\Documents\PowerShellResults\AppReports.csv -Delimiter ";" -NoTypeInformation
-$allAppDashboards | Export-Csv -Path $HOME\Documents\PowerShellResults\AppDashboards.csv -Delimiter ";" -NoTypeInformation
-
-# ==================================================================
-# PART 3: Get Power BI Objects By Groups (Workspaces)
+#region Get Power BI Objects By Groups (Workspaces)
 # ==================================================================
 # create empty array
 $allWorkspaces = @()
@@ -287,23 +290,12 @@ foreach ($ws in $workspaces)
     $allWsDatasets = $allWsDatasets + $wsDatasets
     $allWsDataflows = $allWsDataflows + $wsDataflows
 }
-# 
-$allWorkspaces | Export-Csv -Path $HOME\Documents\PowerShellResults\Workspaces.csv -Delimiter ";" -NoTypeInformation
-$allWsUsers | Export-Csv -Path $HOME\Documents\PowerShellResults\WorkspaceUsers.csv -Delimiter ";" -NoTypeInformation
-$allWsReports | Export-Csv -Path $HOME\Documents\PowerShellResults\WorkspaceReports.csv -Delimiter ";" -NoTypeInformation
-$allWsDashboards | Export-Csv -Path $HOME\Documents\PowerShellResults\WorkspaceDashboards.csv -Delimiter ";" -NoTypeInformation
-$allWsDatasets | Export-Csv -Path $HOME\Documents\PowerShellResults\WorkspaceDatasets.csv -Delimiter ";" -NoTypeInformation
-$allWsDsParameters | Export-Csv -Path $HOME\Documents\PowerShellResults\WorkspaceDatasetParameters.csv -Delimiter ";" -NoTypeInformation
-$allWsDsDatasources | Export-Csv -Path $HOME\Documents\PowerShellResults\WorkspaceDatasetDatasources.csv -Delimiter ";" -NoTypeInformation
-$allWsDsRefreshHistory | Export-Csv -Path $HOME\Documents\PowerShellResults\WorkspaceDatasetRefreshHistory.csv -Delimiter ";" -NoTypeInformation
-$allWsDsGateways | Export-Csv -Path $HOME\Documents\PowerShellResults\WorkspaceDatasetGateways.csv -Delimiter ";" -NoTypeInformation
-$allWsDataflows | Export-Csv -Path $HOME\Documents\PowerShellResults\WorkspaceDataflows.csv -Delimiter ";" -NoTypeInformation
-$allWsDfDatasources | Export-Csv -Path $HOME\Documents\PowerShellResults\WorkspaceDataflowDatasources.csv -Delimiter ";" -NoTypeInformation
+
+#endregion
 
 # ==================================================================
-# PART 3: Get Gateways 
+#region Get Gateways 
 # ==================================================================
-# STEP 2.1: Gateways
 # create empty array
 $allGateways = @()
 $allGwDatasources = @()
@@ -337,10 +329,79 @@ foreach ($gw in $gateways)
     }
     $allGwDatasources = $allGwDatasources + $gwDatasources
 }
-# 
-$allGateways | Export-Csv -Path $HOME\Documents\PowerShellResults\Gateways.csv -Delimiter ";" -NoTypeInformation
-$allGwDatasources | Export-Csv -Path $HOME\Documents\PowerShellResults\GatewayDatasources.csv -Delimiter ";" -NoTypeInformation
-$allGwDtsUsers | Export-Csv -Path $HOME\Documents\PowerShellResults\GatewayDatasourceUsers.csv -Delimiter ";" -NoTypeInformation
+
+#endregion
+
+# ==================================================================
+#region Combine
+# ==================================================================
+# create empty array
+$allReports = @()
+$allDashboards = @()
+$allDatasets = @()
+$allDsParameters = @()
+$allDsDatasources = @()
+$allDsRefreshHistory = @()
+$allDsGateways = @()
+
+# combine my and allWs
+$allReports = $myReports + $allWsReports
+$allDashboards = $myDashboards + $allWsDashboards
+$allDatasets = $myDatasets + $allWsDatasets
+$allDsParameters = $myDsParameters + $allWsDsParameters
+$allDsDatasources = $myDsDatasources + $allWsDsDatasources
+$allDsRefreshHistory = $myDsRefreshHistory + $allWsDsRefreshHistory
+$allDsGateways = $myDsGateways + $allWsDsGateways
+
+#endregion
+
+# ==================================================================
+#region Export-Csv
+# ==================================================================
+# Apps
+$allApps | Export-Csv -Path $ResultsPath\Apps.csv -Delimiter ";" -NoTypeInformation
+$allAppReports | Export-Csv -Path $ResultsPath\AppReports.csv -Delimiter ";" -NoTypeInformation
+$allAppDashboards | Export-Csv -Path $ResultsPath\AppDashboards.csv -Delimiter ";" -NoTypeInformation
+
+# Power BI Objects (My Workspace)
+$myReports | Export-Csv -Path $ResultsPath\MyWorkspaceReports.csv -Delimiter ";" -NoTypeInformation
+$myDashboards | Export-Csv -Path $ResultsPath\MyWorkspaceDashboards.csv -Delimiter ";" -NoTypeInformation
+$myDatasets | Export-Csv -Path $ResultsPath\MyWorkspaceDatasets.csv -Delimiter ";" -NoTypeInformation
+$myDsParameters | Export-Csv -Path $ResultsPath\MyWorkspaceDatasetParameters.csv -Delimiter ";" -NoTypeInformation
+$myDsDatasources | Export-Csv -Path $ResultsPath\MyWorkspaceDatasetDatasources.csv -Delimiter ";" -NoTypeInformation
+$myDsRefreshHistory | Export-Csv -Path $ResultsPath\MyWorkspaceDatasetRefreshHistory.csv -Delimiter ";" -NoTypeInformation
+$myDsGateways | Export-Csv -Path $ResultsPath\MyWorkspaceDatasetGateways.csv -Delimiter ";" -NoTypeInformation
+
+# Power BI Objects By Groups (Workspaces)
+$allWorkspaces | Export-Csv -Path $ResultsPath\Workspaces.csv -Delimiter ";" -NoTypeInformation
+$allWsUsers | Export-Csv -Path $ResultsPath\WorkspaceUsers.csv -Delimiter ";" -NoTypeInformation
+$allWsReports | Export-Csv -Path $ResultsPath\WorkspaceReports.csv -Delimiter ";" -NoTypeInformation
+$allWsDashboards | Export-Csv -Path $ResultsPath\WorkspaceDashboards.csv -Delimiter ";" -NoTypeInformation
+$allWsDatasets | Export-Csv -Path $ResultsPath\WorkspaceDatasets.csv -Delimiter ";" -NoTypeInformation
+$allWsDsParameters | Export-Csv -Path $ResultsPath\WorkspaceDatasetParameters.csv -Delimiter ";" -NoTypeInformation
+$allWsDsDatasources | Export-Csv -Path $ResultsPath\WorkspaceDatasetDatasources.csv -Delimiter ";" -NoTypeInformation
+$allWsDsRefreshHistory | Export-Csv -Path $ResultsPath\WorkspaceDatasetRefreshHistory.csv -Delimiter ";" -NoTypeInformation
+$allWsDsGateways | Export-Csv -Path $ResultsPath\WorkspaceDatasetGateways.csv -Delimiter ";" -NoTypeInformation
+$allWsDataflows | Export-Csv -Path $ResultsPath\WorkspaceDataflows.csv -Delimiter ";" -NoTypeInformation
+$allWsDfDatasources | Export-Csv -Path $ResultsPath\WorkspaceDataflowDatasources.csv -Delimiter ";" -NoTypeInformation
+# Json
+$allWsDataflows | ConvertTo-Json -Depth 4 | Out-File -FilePath $ResultsPath\WorkspaceDataflows.json -Force
+
+# Gateways
+$allGateways | Export-Csv -Path $ResultsPath\Gateways.csv -Delimiter ";" -NoTypeInformation
+$allGwDatasources | Export-Csv -Path $ResultsPath\GatewayDatasources.csv -Delimiter ";" -NoTypeInformation
+$allGwDtsUsers | Export-Csv -Path $ResultsPath\GatewayDatasourceUsers.csv -Delimiter ";" -NoTypeInformation
+
+# Combined
+$allReports | Export-Csv -Path $ResultsPath\allReports.csv -Delimiter ";" -NoTypeInformation
+$allDashboards | Export-Csv -Path $ResultsPath\allDashboards.csv -Delimiter ";" -NoTypeInformation
+$allDatasets | Export-Csv -Path $ResultsPath\allDatasets.csv -Delimiter ";" -NoTypeInformation
+$allDsParameters | Export-Csv -Path $ResultsPath\allDsParameters.csv -Delimiter ";" -NoTypeInformation
+$allDsDatasources | Export-Csv -Path $ResultsPath\allDsDatasources.csv -Delimiter ";" -NoTypeInformation
+$allDsRefreshHistory | Export-Csv -Path $ResultsPath\allDsRefreshHistory.csv -Delimiter ";" -NoTypeInformation
+$allDsGateways | Export-Csv -Path $ResultsPath\allDsGateways.csv -Delimiter ";" -NoTypeInformation
+
+#endregion
 
 # 
 Write-Host "Complete"
